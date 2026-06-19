@@ -32,37 +32,29 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { getPurchaseOrdersAction } from "@/app/actions/purchase.actions"
+import { getPurchaseOrdersAction, deletePurchaseOrderAction } from "@/app/actions/purchase.actions"
 import { formatPriceARS } from "@/lib/utils/currency.utils"
 import { formatDateShort } from "@/lib/utils/date.utils"
+import { Toast } from "@/components/ui/toast"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 11
 
-const ORDER_STATUS_LABELS: Record<string, string> = {
-  PENDIENTE: "Pendiente",
-  RECIBIDO: "Recibido",
-  PARCIAL: "Parcial",
-  CANCELADO: "Cancelado",
-}
-
-const ORDER_STATUS_VALUES = ["", "PENDIENTE", "RECIBIDO", "PARCIAL", "CANCELADO"] as const
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PurchaseItemShape = {
   id: string
-  product: { name: string }
+  orderedQuantity: number
+  product: { name: string; costPrice: number | null }
 }
 
 type PurchaseRow = {
   id: string
   purchaseDate: Date
-  invoiceNumber: string | null
-  orderStatus: string
   totalOrderCost: number | null
-  supplier: { businessName: string }
+  supplier: { businessName: string } | null
   items: PurchaseItemShape[]
 }
 
@@ -76,8 +68,24 @@ export function PurchasesTable() {
   const [orders, setOrders] = useState<PurchaseRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [showDeletedToast, setShowDeletedToast] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+
+  // ── Check URL for success param ─────────────────────────────────────────
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has("success")) {
+      setShowSuccess(true)
+      const url = new URL(window.location.href)
+      url.searchParams.delete("success")
+      window.history.replaceState({}, "", url.toString())
+    }
+  }, [])
 
 
   // ── fetchOrders ───────────────────────────────────────────────────────────
@@ -106,15 +114,12 @@ export function PurchasesTable() {
   const filteredOrders = orders.filter((order) => {
     const matchesSearch =
       !searchTerm.trim() ||
-      order.supplier.businessName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.supplier?.businessName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.items.some((item) =>
         item.product.name.toLowerCase().includes(searchTerm.toLowerCase()),
       )
 
-    const matchesStatus = !statusFilter || order.orderStatus === statusFilter
-
-    return matchesSearch && matchesStatus
+    return matchesSearch
   })
 
 
@@ -137,9 +142,18 @@ export function PurchasesTable() {
     setCurrentPage(1)
   }
 
-  const handleStatusChange = (value: string) => {
-    setStatusFilter(value)
-    setCurrentPage(1)
+
+  // ── Delete ──────────────────────────────────────────────────────────────
+
+  const handleOrderDelete = async (orderId: string) => {
+    setDeletingId(null)
+    const result = await deletePurchaseOrderAction(orderId)
+    if (result.success) {
+      setOrders((prev) => prev.filter((o) => o.id !== orderId))
+      setShowDeletedToast(true)
+    } else {
+      setError(result.error ?? "Error al eliminar la orden.")
+    }
   }
 
 
@@ -162,31 +176,51 @@ export function PurchasesTable() {
   return (
     <div className="rounded-xl border bg-card">
 
-      {/* ── Search & Filters ───────────────────────────────────────────── */}
+      {/* ── Toast Notification ──────────────────────────────────────────────── */}
+      {showSuccess && (
+        <Toast
+          message="Orden de compra creada correctamente."
+          variant="success"
+          onClose={() => setShowSuccess(false)}
+        />
+      )}
+
+      {showDeletedToast && (
+        <Toast
+          message="Orden de compra eliminada correctamente."
+          variant="success"
+          onClose={() => setShowDeletedToast(false)}
+        />
+      )}
+
+      {/* ── Confirm Delete Dialog ──────────────────────────────── */}
+      <ConfirmDialog
+        open={deletingId !== null}
+        title="Eliminar orden de compra"
+        message="¿Estás seguro de eliminar esta orden? Los productos quedarán disponibles para nuevas órdenes."
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        onConfirm={() => handleOrderDelete(deletingId!)}
+        onCancel={() => setDeletingId(null)}
+      />
+
+      {/* ── Search ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3 border-b px-6 py-4">
+        {error && (
+          <div className="w-full rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Buscar por proveedor, factura o producto..."
+            placeholder="Buscar por proveedor o producto..."
             className="w-full rounded-lg border border-input bg-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          className="rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">Todos los estados</option>
-          {ORDER_STATUS_VALUES.filter(Boolean).map((value) => (
-            <option key={value} value={value}>
-              {ORDER_STATUS_LABELS[value]}
-            </option>
-          ))}
-        </select>
       </div>
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
@@ -203,8 +237,7 @@ export function PurchasesTable() {
               <TableRow>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Proveedor</TableHead>
-                <TableHead>Factura</TableHead>
-                <TableHead>Estado</TableHead>
+                <TableHead>Envío</TableHead>
                 <TableHead>Costo total</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
@@ -220,13 +253,17 @@ export function PurchasesTable() {
                     {formatDateShort(order.purchaseDate)}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {order.supplier.businessName}
+                    {order.supplier?.businessName ?? "—"}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {order.invoiceNumber ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {ORDER_STATUS_LABELS[order.orderStatus] ?? order.orderStatus}
+                    {(() => {
+                      const productCost = order.items.reduce(
+                        (sum, item) => sum + (item.product.costPrice ?? 0) * item.orderedQuantity,
+                        0,
+                      )
+                      const shipping = Math.max(0, (order.totalOrderCost ?? 0) - productCost)
+                      return shipping > 0 ? formatPriceARS(shipping) : "Sin envío"
+                    })()}
                   </TableCell>
                   <TableCell className="text-sm font-medium">
                     {order.totalOrderCost != null
@@ -251,6 +288,12 @@ export function PurchasesTable() {
                           onClick={() => handleViewDetail(order.id)}
                         >
                           Ver detalle
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="cursor-pointer text-destructive"
+                          onClick={() => setDeletingId(order.id)}
+                        >
+                          Eliminar
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

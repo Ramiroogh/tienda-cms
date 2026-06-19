@@ -47,6 +47,7 @@ import type { ProductWithVariants } from "@/types/product.types"
 import type { ProductVariant } from "@/generated/prisma/client"
 import { VariantInfoModal } from "@/components/products/VariantInfoModal"
 import { ConfirmDeleteModal } from "@/components/products/ConfirmDeleteModal"
+import { Toast } from "@/components/ui/toast"
 
 const PAGE_SIZE = 11
 
@@ -58,6 +59,7 @@ export function ProductsTable({ onEdit, supplierId }: { onEdit?: (id: string) =>
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [currentPage, setCurrentPage] = useState(1)
+  const [showSuccess, setShowSuccess] = useState(false)
   const [variantModalProduct, setVariantModalProduct] = useState<ProductWithVariants | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ProductWithVariants | null>(null)
 
@@ -67,6 +69,18 @@ export function ProductsTable({ onEdit, supplierId }: { onEdit?: (id: string) =>
     if (prices.length === 0) return { type: "single" as const, price: salePrice }
     if (new Set(prices).size === 1) return { type: "single" as const, price: prices[0] }
     return { type: "mixed" as const }
+  }
+
+  function getVariantTypes(variants: ProductVariant[]): string[] {
+    const types = new Set<string>()
+    for (const v of variants) {
+      if (v.size) types.add("Talle")
+      if (v.color) types.add("Color")
+      if (v.propertyName1) types.add(v.propertyName1)
+      if (v.propertyName2) types.add(v.propertyName2)
+      if (v.propertyName3) types.add(v.propertyName3)
+    }
+    return Array.from(types)
   }
 
   // ── fetchProducts ──────────────────────────────────────────────────────────
@@ -90,6 +104,20 @@ export function ProductsTable({ onEdit, supplierId }: { onEdit?: (id: string) =>
   useEffect(() => {
     fetchProducts()
   }, [fetchProducts])
+
+
+  // ── Check URL for success param ─────────────────────────────────────────
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has("success")) {
+      setShowSuccess(true)
+      const url = new URL(window.location.href)
+      url.searchParams.delete("success")
+      window.history.replaceState({}, "", url.toString())
+    }
+  }, [])
+
 
   // ── Pagination ─────────────────────────────────────────────────────────────
 
@@ -166,6 +194,15 @@ export function ProductsTable({ onEdit, supplierId }: { onEdit?: (id: string) =>
 
   return (
     <>
+      {/* ── Toast Notification ──────────────────────────────────────────────── */}
+      {showSuccess && (
+        <Toast
+          message="Producto creado correctamente."
+          variant="success"
+          onClose={() => setShowSuccess(false)}
+        />
+      )}
+
       <div className="rounded-xl border bg-card">
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -203,7 +240,8 @@ export function ProductsTable({ onEdit, supplierId }: { onEdit?: (id: string) =>
               <TableHead>Producto</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead>Stock</TableHead>
-              <TableHead className="text-right">Precio</TableHead>
+              <TableHead>Variantes</TableHead>
+              <TableHead className="text-right">Precio Venta</TableHead>
               <TableHead className="hidden md:table-cell">Fecha</TableHead>
               <TableHead className="w-12" />
             </TableRow>
@@ -241,15 +279,43 @@ export function ProductsTable({ onEdit, supplierId }: { onEdit?: (id: string) =>
                   </TableCell>
 
                   <TableCell>
-                    <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium">
+                    <span className={
+                      `inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                        product.productStatus === "ACTIVE"
+                          ? "border-green-200 bg-green-100 text-green-700"
+                          : product.productStatus === "INACTIVE"
+                            ? "border-border bg-white text-muted-foreground"
+                            : "border-border bg-muted text-muted-foreground"
+                      }`
+                    }>
                       {statusConfig.label}
                     </span>
                   </TableCell>
 
                   <TableCell>
-                    <span className={mainStock <= 5 ? "font-medium text-destructive" : ""}>
-                      {mainStock} u.
-                    </span>
+                    {mainStock === 0 ? (
+                      <span className="font-medium text-destructive">Sin Stock</span>
+                    ) : (
+                      <span className={mainStock <= 5 ? "font-medium text-destructive" : ""}>
+                        {mainStock} u.
+                      </span>
+                    )}
+                  </TableCell>
+
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {getVariantTypes(product.variants).map((type) => (
+                        <span
+                          key={type}
+                          className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                        >
+                          {type}
+                        </span>
+                      ))}
+                      {product.variants.length === 0 && (
+                        <span className="text-xs text-muted-foreground">Sin variantes</span>
+                      )}
+                    </div>
                   </TableCell>
 
                   <TableCell className="text-right font-medium">

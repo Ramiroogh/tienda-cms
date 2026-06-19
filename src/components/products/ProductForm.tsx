@@ -201,7 +201,7 @@ export function ProductForm() {
 
   const canGoNextStep2 = () => {
     if (savedVariants.length > 0) {
-      return combinations.some((c) => (c.price ?? 0) > 0)
+      return (basePrice ?? 0) > 0 || combinations.some((c) => (c.price ?? 0) > 0)
     }
     return (basePrice ?? 0) > 0
   }
@@ -357,7 +357,7 @@ savedVariants.forEach((v, idx) => {
       const result = await createProductAction(formData)
       if (result.success) {
         clearDraft()
-        router.push("/products")
+        router.push("/products?success=1")
       } else {
         setError(result.error ?? "Error al crear el producto")
       }
@@ -666,24 +666,8 @@ savedVariants.forEach((v, idx) => {
               </section>
 
               <section className="space-y-4">
-                <h2 className="text-base font-medium">Precio base</h2>
+                <h2 className="text-base font-medium">Precios</h2>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Precio base (herencia)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={basePrice ?? ""}
-                        onChange={(e) => setBasePrice(e.target.value ? parseFloat(e.target.value) : null)}
-                        className="w-full rounded-lg border border-input bg-background py-2 pl-7 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">Las combinaciones sin precio heredarán este valor</p>
-                  </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Precio de costo</label>
                     <div className="relative">
@@ -699,6 +683,22 @@ savedVariants.forEach((v, idx) => {
                       />
                     </div>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Precio de venta (herencia)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={basePrice ?? ""}
+                        onChange={(e) => setBasePrice(e.target.value ? parseFloat(e.target.value) : null)}
+                        className="w-full rounded-lg border border-input bg-background py-2 pl-7 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Las combinaciones sin precio heredarán este valor</p>
+                  </div>
                 </div>
               </section>
 
@@ -712,8 +712,23 @@ savedVariants.forEach((v, idx) => {
             </>
           ) : (
             <section className="space-y-4">
-              <h2 className="text-base font-medium">Precio y stock</h2>
-              <div className="grid gap-4 md:grid-cols-2">
+              <h2 className="text-base font-medium">Precios</h2>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Precio de costo</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={costPrice ?? ""}
+                      onChange={(e) => setCostPrice(e.target.value ? parseFloat(e.target.value) : null)}
+                      className="w-full rounded-lg border border-input bg-background py-2 pl-7 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
                     Precio de venta <span className="text-destructive">*</span>
@@ -727,21 +742,6 @@ savedVariants.forEach((v, idx) => {
                       required
                       value={basePrice ?? ""}
                       onChange={(e) => setBasePrice(e.target.value ? parseFloat(e.target.value) : null)}
-                      className="w-full rounded-lg border border-input bg-background py-2 pl-7 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Precio de costo</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={costPrice ?? ""}
-                      onChange={(e) => setCostPrice(e.target.value ? parseFloat(e.target.value) : null)}
                       className="w-full rounded-lg border border-input bg-background py-2 pl-7 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                       placeholder="0.00"
                     />
@@ -837,7 +837,7 @@ savedVariants.forEach((v, idx) => {
             <h3 className="mb-3 text-sm font-medium">Precios</h3>
             <div className="grid gap-3 text-sm md:grid-cols-2">
               <div>
-                <span className="text-xs text-muted-foreground">Precio base</span>
+                  <span className="text-xs text-muted-foreground">Precio de venta</span>
                 <p className="font-medium">${(basePrice ?? 0).toFixed(2)}</p>
               </div>
               {costPrice && (
@@ -901,6 +901,57 @@ savedVariants.forEach((v, idx) => {
               </div>
             </section>
           )}
+
+          {/* ── Financial Summary ──────────────────────────────────────────── */}
+          {(() => {
+            const productTotalCost = savedVariants.length > 0
+              ? combinations.reduce((sum, c) => sum + (costPrice ?? 0) * c.stock, 0)
+              : (costPrice ?? 0) * stock
+
+            const productTotalSale = savedVariants.length > 0
+              ? combinations.reduce((sum, c) => sum + (c.price ?? basePrice ?? 0) * c.stock, 0)
+              : (basePrice ?? 0) * stock
+
+            const productProfit = productTotalSale - productTotalCost
+
+            return (
+              <div className="rounded-xl border bg-card">
+                <div className="border-b px-5 py-3">
+                  <h3 className="text-sm font-semibold">Resumen financiero</h3>
+                </div>
+                <div className="grid grid-cols-3 divide-x">
+                  <div className="px-5 py-4">
+                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Total Costo
+                    </p>
+                    <p className="mt-1 text-lg font-semibold tabular-nums">
+                      ${productTotalCost.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Subtotal
+                    </p>
+                    <p className="mt-1 text-lg font-semibold tabular-nums text-sky-700">
+                      ${productTotalSale.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Ganancia Real
+                    </p>
+                    <p
+                      className={`mt-1 text-lg font-semibold tabular-nums ${
+                        productProfit >= 0 ? "text-emerald-600" : "text-destructive"
+                      }`}
+                    >
+                      {productProfit >= 0 ? "+" : ""}${productProfit.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           <div className="flex items-center justify-between pt-4">
             <button

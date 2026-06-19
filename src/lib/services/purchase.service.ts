@@ -12,7 +12,6 @@
 // @/lib/services/product.service     → productService
 // @/lib/errors/domain.errors         → SupplierInactiveError,
 //                                       PurchaseOrderNotFoundError,
-//                                       CannotModifyReceivedOrderError,
 //                                       ProductNotFoundError
 // @/types/purchase.types             → RegisterPurchaseNewProductPayload,
 //                                       RegisterRestockPayload,
@@ -29,7 +28,6 @@ import { stockService } from "@/lib/services/stock.service"
 import {
   SupplierInactiveError,
   PurchaseOrderNotFoundError,
-  CannotModifyReceivedOrderError,
   ProductNotFoundError,
 } from "@/lib/errors/domain.errors"
 import type {
@@ -37,6 +35,7 @@ import type {
   RegisterRestockPayload,
   PurchaseOrderWithItems,
 } from "@/types/purchase.types"
+import type { Prisma } from "@/generated/prisma/client"
 
 export const purchaseService = {
 
@@ -48,10 +47,12 @@ export const purchaseService = {
   registerPurchaseWithNewProduct: async (
     payload: RegisterPurchaseNewProductPayload,
   ): Promise<void> => {
-    const supplier = await purchaseRepository.findSupplierById(payload.supplierId)
+    if (payload.supplierId) {
+      const supplier = await purchaseRepository.findSupplierById(payload.supplierId)
 
-    if (!supplier || !supplier.isActive) {
-      throw new SupplierInactiveError(payload.supplierId)
+      if (!supplier || !supplier.isActive) {
+        throw new SupplierInactiveError(payload.supplierId)
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -78,7 +79,6 @@ export const purchaseService = {
 
       const order = await purchaseRepository.createOrder(tx, {
         supplierId: payload.supplierId,
-        orderStatus: "RECIBIDO",
         purchaseDate: payload.purchaseDate,
         invoiceNumber: payload.invoiceNumber,
         notes: payload.notes,
@@ -125,16 +125,17 @@ export const purchaseService = {
   registerPurchaseRestock: async (
     payload: RegisterRestockPayload,
   ): Promise<void> => {
-    const supplier = await purchaseRepository.findSupplierById(payload.supplierId)
+    if (payload.supplierId) {
+      const supplier = await purchaseRepository.findSupplierById(payload.supplierId)
 
-    if (!supplier || !supplier.isActive) {
-      throw new SupplierInactiveError(payload.supplierId)
+      if (!supplier || !supplier.isActive) {
+        throw new SupplierInactiveError(payload.supplierId)
+      }
     }
 
     await prisma.$transaction(async (tx) => {
       const order = await purchaseRepository.createOrder(tx, {
         supplierId: payload.supplierId,
-        orderStatus: "RECIBIDO",
         purchaseDate: payload.purchaseDate,
         invoiceNumber: payload.invoiceNumber,
         notes: payload.notes,
@@ -177,66 +178,95 @@ export const purchaseService = {
   },
 
 
-  // ── receivePurchaseOrder ────────────────────────────────────────────────────
-  // Recepción posterior de una orden en estado PENDIENTE.
-  // Si se especifican receivedItems, se marca como PARCIAL.
-  // Si no, se recibe todo y pasa a RECIBIDO.
+  // ── registerPurchaseOrder ────────────────────────────────────────────────────
+  // Nuevo flujo: selecciona productos sin purchaseOrderId,
+  // crea la orden y marca los productos con purchaseOrderId.
 
-  receivePurchaseOrder: async (
-    purchaseOrderId: string,
-    receivedItems?: Array<{
-      itemId: string
-      receivedQuantity: number
-    }>,
-  ): Promise<void> => {
-    const order = await purchaseRepository.findOrderById(purchaseOrderId)
+  registerPurchaseOrder: async (payload: {
+    supplierId?: string
+    purchaseDate?: Date
+    invoiceNumber?: string
+    shippingCost?: number
+    notes?: string
+    productIds: string[]
+  }): Promise<void> => {
+    if (payload.supplierId) {
+      const supplier = await purchaseRepository.findSupplierById(payload.supplierId)
 
-    if (!order) {
-      throw new PurchaseOrderNotFoundError(purchaseOrderId)
-    }
-
-    if (order.orderStatus === "RECIBIDO") {
-      throw new CannotModifyReceivedOrderError(purchaseOrderId)
+      if (!supplier || !supplier.isActive) {
+        throw new SupplierInactiveError(payload.supplierId)
+      }
     }
 
     await prisma.$transaction(async (tx) => {
-      if (receivedItems && receivedItems.length > 0) {
-        for (const ri of receivedItems) {
-          const orderItem = order.items.find((i) => i.id === ri.itemId)
+      const order = await purchaseRepository.createOrder(tx, {
+        supplierId: payload.supplierId,
+        purchaseDate: payload.purchaseDate ?? new Date(),
+        notes: payload.notes,
+      })
 
-          if (orderItem) {
-            await stockService.increaseStock(
-              orderItem.variantId!,
-              ri.receivedQuantity,
-              "PURCHASE",
-              purchaseOrderId,
-              undefined,
-              tx,
-            )
-          }
-        }
+      let orderTotalCost = 0
 
-        await purchaseRepository.updateOrderStatus(purchaseOrderId, {
-          orderStatus: "PARCIAL",
-          receivedAt: new Date(),
+      for (const productId of payload.productIds) {
+        const product = await tx.product.findUnique({
+          where: { id: productId },
+          include: { variants: true },
         })
-      } else {
-        for (const item of order.items) {
-          await stockService.increaseStock(
-            item.variantId!,
-            item.orderedQuantity,
-            "PURCHASE",
-            purchaseOrderId,
-            undefined,
-            tx,
-          )
+
+        if (!product) {
+          throw new ProductNotFoundError(productId)
         }
 
-        await purchaseRepository.updateOrderStatus(purchaseOrderId, {
-          orderStatus: "RECIBIDO",
-          receivedAt: new Date(),
+        if (product.purchaseOrderId) {
+          throw new Error(`El producto "${product.name}" ya tiene una orden de compra asignada.`)
+        }
+
+        for (const variant of product.variants) {
+          await purchaseRepository.createOrderItem(tx, {
+            purchaseOrderId: order.id,
+            productId: product.id,
+            variantId: variant.id,
+            orderedQuantity: variant.stockLevel,
+            unitCost: product.costPrice ?? 0,
+          })
+
+          orderTotalCost += (product.costPrice ?? 0) * variant.stockLevel
+        }
+
+        await tx.product.update({
+          where: { id: product.id },
+          data: { purchaseOrderId: order.id },
         })
       }
+
+      await tx.purchaseOrder.update({
+        where: { id: order.id },
+        data: { totalOrderCost: orderTotalCost + (payload.shippingCost ?? 0) },
+      })
+    })
+  },
+
+
+  // ── deletePurchaseOrder ────────────────────────────────────────────────────
+  // Desarma la orden: libera los productos para ser usados en otra orden
+  // y elimina el registro de la orden de compra.
+
+  deletePurchaseOrder: async (orderId: string): Promise<void> => {
+    const order = await purchaseRepository.findOrderById(orderId)
+
+    if (!order) {
+      throw new PurchaseOrderNotFoundError(orderId)
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const item of order.items) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { purchaseOrderId: null },
+        })
+      }
+
+      await purchaseRepository.deleteOrder(tx, orderId)
     })
   },
 

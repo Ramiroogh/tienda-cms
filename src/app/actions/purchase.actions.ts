@@ -8,7 +8,6 @@
 //                                       createSupplierSchema, updateSupplierSchema
 // @/lib/errors/domain.errors        → SupplierInactiveError,
 //                                       PurchaseOrderNotFoundError,
-//                                       CannotModifyReceivedOrderError,
 //                                       ProductNotFoundError
 //
 // ─── Usado por ────────────────────────────────────────────────────────────────
@@ -28,7 +27,6 @@ import {
 import {
   SupplierInactiveError,
   PurchaseOrderNotFoundError,
-  CannotModifyReceivedOrderError,
 } from "@/lib/errors/domain.errors"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -133,6 +131,33 @@ export async function registerRestockAction(
   }
 }
 
+export async function registerPurchaseOrderAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const rawData = Object.fromEntries(formData)
+
+  try {
+    const productIds = JSON.parse((rawData.productIds as string) ?? "[]") as string[]
+    if (productIds.length === 0) {
+      return { success: false, error: "Debe seleccionar al menos un producto." }
+    }
+
+    await purchaseService.registerPurchaseOrder({
+      supplierId: rawData.supplierId ? (rawData.supplierId as string) : undefined,
+      purchaseDate: rawData.purchaseDate ? new Date(rawData.purchaseDate as string) : undefined,
+      shippingCost: rawData.shippingCost ? Number(rawData.shippingCost) : undefined,
+      notes: rawData.notes as string,
+      productIds,
+    })
+    return { success: true }
+  } catch (error) {
+    if (error instanceof SupplierInactiveError) {
+      return { success: false, error: error.message }
+    }
+    return { success: false, error: error instanceof Error ? error.message : "Error al registrar la orden de compra." }
+  }
+}
+
 export async function getPurchaseOrdersAction(): Promise<ActionResult> {
   try {
     const orders = await purchaseService.getPurchaseOrders()
@@ -156,20 +181,16 @@ export async function getPurchaseOrderByIdAction(
   }
 }
 
-export async function receivePurchaseOrderAction(
+export async function deletePurchaseOrderAction(
   orderId: string,
-  receivedItems?: Array<{ itemId: string; receivedQuantity: number }>,
 ): Promise<ActionResult> {
   try {
-    await purchaseService.receivePurchaseOrder(orderId, receivedItems)
+    await purchaseService.deletePurchaseOrder(orderId)
     return { success: true }
   } catch (error) {
     if (error instanceof PurchaseOrderNotFoundError) {
       return { success: false, error: error.message }
     }
-    if (error instanceof CannotModifyReceivedOrderError) {
-      return { success: false, error: error.message }
-    }
-    return { success: false, error: "Error al recibir la orden." }
+    return { success: false, error: error instanceof Error ? error.message : "Error al eliminar la orden de compra." }
   }
 }

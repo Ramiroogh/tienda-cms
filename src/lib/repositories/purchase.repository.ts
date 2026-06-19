@@ -24,7 +24,7 @@ export const purchaseRepository = {
         supplier: true,
         items: {
           include: {
-            product: { select: { name: true } },
+            product: { select: { name: true, salePrice: true, costPrice: true } },
             variant: { select: { size: true, color: true } },
           },
         },
@@ -43,7 +43,7 @@ export const purchaseRepository = {
         supplier: true,
         items: {
           include: {
-            product: { select: { name: true } },
+            product: { select: { name: true, salePrice: true, costPrice: true } },
             variant: { select: { size: true, color: true } },
           },
         },
@@ -57,8 +57,7 @@ export const purchaseRepository = {
   createOrder: async (
     tx: Prisma.TransactionClient,
     data: {
-      supplierId: string
-      orderStatus: string
+      supplierId?: string
       purchaseDate: Date
       invoiceNumber?: string
       totalOrderCost?: number
@@ -68,8 +67,6 @@ export const purchaseRepository = {
     return tx.purchaseOrder.create({
       data: {
         supplierId: data.supplierId,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        orderStatus: data.orderStatus as any,
         purchaseDate: data.purchaseDate,
         invoiceNumber: data.invoiceNumber,
         totalOrderCost: data.totalOrderCost,
@@ -96,19 +93,11 @@ export const purchaseRepository = {
   },
 
 
-  // ── updateOrderStatus ────────────────────────────────────────────────────────
+  // ── deleteOrder ────────────────────────────────────────────────────────────
 
-  updateOrderStatus: async (
-    orderId: string,
-    data: {
-      orderStatus: "PENDIENTE" | "RECIBIDO" | "PARCIAL" | "CANCELADO"
-      receivedAt?: Date
-    },
-  ): Promise<void> => {
-    await prisma.purchaseOrder.update({
-      where: { id: orderId },
-      data,
-    })
+  deleteOrder: async (tx: Prisma.TransactionClient, orderId: string): Promise<void> => {
+    await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: orderId } })
+    await tx.purchaseOrder.delete({ where: { id: orderId } })
   },
 
 

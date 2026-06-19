@@ -164,3 +164,21 @@ export async function getProductByIdAction(
     return { success: false, error: "Error al obtener el producto." }
   }
 }
+
+export async function getAvailableForPurchaseAction(): Promise<ActionResult> {
+  try {
+    const products = await productService.getAvailableForPurchase()
+    return { success: true, data: products }
+  } catch {
+    return { success: false, error: "Error al obtener productos disponibles." }
+  }
+}
+
+export async function getAvailableForSaleAction(): Promise<ActionResult> {
+  try {
+    const products = await productService.getAvailableForSale()
+    return { success: true, data: products }
+  } catch {
+    return { success: false, error: "Error al obtener productos disponibles para venta." }
+  }
+}

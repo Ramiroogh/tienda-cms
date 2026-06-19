@@ -25,36 +25,16 @@ type SupplierDetailProps = {
   supplierId: string
 }
 
-const PURCHASE_STATUS_BADGE: Record<string, { label: string; variant: string }> = {
-  PENDIENTE: { label: "Pendiente", variant: "secondary" },
-  RECIBIDO: { label: "Recibido", variant: "default" },
-  PARCIAL: { label: "Parcial", variant: "outline" },
-  CANCELADO: { label: "Cancelado", variant: "destructive" },
-}
-
-const PURCHASE_ORDER_STATUS = ["PENDIENTE", "RECIBIDO", "PARCIAL", "CANCELADO"] as const
-
 type PurchaseOrderItem = {
   id: string
   purchaseDate: Date
-  invoiceNumber: string | null
-  orderStatus: string
   totalOrderCost: number | null
 }
 
-const statusOrder: Record<string, number> = {
-  PENDIENTE: 0,
-  PARCIAL: 1,
-  RECIBIDO: 2,
-  CANCELADO: 3,
-}
-
 function sortOrders(orders: PurchaseOrderItem[]): PurchaseOrderItem[] {
-  return [...orders].sort((a, b) => {
-    const statusDiff = (statusOrder[a.orderStatus] ?? 99) - (statusOrder[b.orderStatus] ?? 99)
-    if (statusDiff !== 0) return statusDiff
-    return new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime()
-  })
+  return [...orders].sort((a, b) =>
+    new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime(),
+  )
 }
 
 export async function SupplierDetail({ supplierId }: SupplierDetailProps) {
@@ -142,39 +122,22 @@ export async function SupplierDetail({ supplierId }: SupplierDetailProps) {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Fecha</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Factura</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Estado</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Envío</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Total</th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order) => {
-                    const badge = PURCHASE_STATUS_BADGE[order.orderStatus]
-
-                    return (
-                      <tr key={order.id} className="border-b last:border-0 hover:bg-muted/50">
+                  {orders.map((order) => (
+                    <tr key={order.id} className="border-b last:border-0 hover:bg-muted/50">
                         <td className="px-4 py-3">{formatDateShort(order.purchaseDate)}</td>
                         <td className="px-4 py-3 text-muted-foreground">
-                          {order.invoiceNumber ?? "—"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                              badge.variant === "destructive"
-                                ? "border-destructive/20 bg-destructive/10 text-destructive"
-                                : badge.variant === "default"
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : badge.variant === "outline"
-                                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                                    : "border-border bg-muted text-muted-foreground"
-                            }`}
-                          >
-                            {badge.label}
-                          </span>
+                          {order.totalOrderCost != null && order.totalOrderCost > 0
+                            ? `$${order.totalOrderCost.toLocaleString("es-AR")}`
+                            : "Sin envío"}
                         </td>
                         <td className="px-4 py-3 text-right font-medium">
-                          {order.totalOrderCost
+                          {order.totalOrderCost != null
                             ? `$${order.totalOrderCost.toLocaleString("es-AR")}`
                             : "—"}
                         </td>
@@ -187,8 +150,7 @@ export async function SupplierDetail({ supplierId }: SupplierDetailProps) {
                           </a>
                         </td>
                       </tr>
-                    )
-                  })}
+                    ))}
                 </tbody>
               </table>
             </div>

@@ -4,7 +4,7 @@
 //
 // ─── Dependencias ─────────────────────────────────────────────────────────────
 // @prisma/client                     → PurchaseOrder, PurchaseOrderItem,
-//                                      PurchaseOrderStatus, Supplier
+//                                      Supplier
 //
 // ─── Usado por ────────────────────────────────────────────────────────────────
 // lib/services/purchase.service.ts
@@ -20,11 +20,11 @@ import type {
 export type PurchaseOrderWithItems = PurchaseOrder & {
   items: Array<
     PurchaseOrderItem & {
-      product: { name: string }
+      product: { name: string; salePrice: number | null; costPrice: number | null }
       variant: { size: string | null; color: string | null } | null
     }
   >
-  supplier: Supplier
+  supplier: Supplier | null
 }
 
 export type RegisterPurchaseNewProductPayload = {
@@ -36,7 +36,7 @@ export type RegisterPurchaseNewProductPayload = {
   costPrice?: number
   salePrice: number
   variants: Array<{ size?: string; color?: string }>
-  supplierId: string
+  supplierId?: string
   purchaseDate: Date
   invoiceNumber?: string
   notes?: string
@@ -48,7 +48,7 @@ export type RegisterPurchaseNewProductPayload = {
 }
 
 export type RegisterRestockPayload = {
-  supplierId: string
+  supplierId?: string
   purchaseDate: Date
   invoiceNumber?: string
   notes?: string

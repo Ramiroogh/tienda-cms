@@ -11,6 +11,7 @@
 
 import { BackButton } from "@/components/ui/BackButton"
 import { PurchaseDetail } from "@/components/purchases/PurchaseDetail"
+import { DeleteOrderSection } from "@/components/purchases/DeleteOrderSection"
 
 type PurchaseDetailPageProps = {
   params: Promise<{ id: string }>
@@ -27,6 +28,10 @@ export default async function PurchaseDetailPage({ params }: PurchaseDetailPageP
       </div>
 
       <PurchaseDetail purchaseOrderId={id} />
+
+      <div className="flex justify-end border-t pt-6">
+        <DeleteOrderSection purchaseOrderId={id} />
+      </div>
     </div>
   )
 }

@@ -146,4 +146,121 @@ export const saleService = {
     return sale
   },
 
+
+  // ── registerSaleOrder ────────────────────────────────────────────────────────
+  // Nuevo flujo: selecciona productos sin saleOrderId,
+  // crea la venta con todos los productos seleccionados,
+  // descuenta stock y marca los productos con saleOrderId.
+
+  registerSaleOrder: async (payload: {
+    saleChannel: string
+    paymentMethod: string
+    discountAmount?: number
+    notes?: string
+    productIds: Array<{ productId: string; unitPrice: number }>
+  }): Promise<void> => {
+    const saleDate = new Date()
+    const discountAmount = payload.discountAmount ?? 0
+
+    // ── Validaciones previas ──────────────────────────────────────────────────
+
+    for (const item of payload.productIds) {
+      const product = await prisma.product.findUnique({
+        where: { id: item.productId },
+        include: { variants: true },
+      })
+
+      if (!product) {
+        throw new ProductNotActiveError(item.productId)
+      }
+
+      if (product.productStatus !== "ACTIVE" || !product.isActive) {
+        throw new ProductNotActiveError(item.productId)
+      }
+
+      if (product.saleOrderId) {
+        throw new Error(`El producto "${product.name}" ya fue vendido.`)
+      }
+
+      for (const variant of product.variants) {
+        if (variant.stockLevel <= 0) {
+          throw new InsufficientStockError(
+            product.name,
+            variant.stockLevel,
+            1,
+          )
+        }
+      }
+    }
+
+    // ── Cálculo de totales ────────────────────────────────────────────────────
+
+    const subtotal = payload.productIds.reduce(
+      (sum, item) => sum + item.unitPrice,
+      0,
+    )
+    const saleTotal = subtotal - discountAmount
+
+    // ── Transacción atómica ────────────────────────────────────────────────────
+
+    await prisma.$transaction(async (tx) => {
+      const items: Array<{
+        productId: string
+        variantId: string
+        soldQuantity: number
+        unitPrice: number
+      }> = []
+
+      for (const entry of payload.productIds) {
+        const product = await tx.product.findUnique({
+          where: { id: entry.productId },
+          include: { variants: true },
+        })
+
+        if (!product) continue
+
+        for (const variant of product.variants) {
+          items.push({
+            productId: product.id,
+            variantId: variant.id,
+            soldQuantity: variant.stockLevel,
+            unitPrice: product.salePrice ?? entry.unitPrice,
+          })
+        }
+      }
+
+      const createdSale = await saleRepository.create(tx, {
+        saleDate,
+        saleChannel: payload.saleChannel,
+        paymentMethod: payload.paymentMethod,
+        discountAmount,
+        saleTotal,
+        notes: payload.notes,
+        items: items.map((item) => ({
+          productId: item.productId,
+          variantId: item.variantId,
+          soldQuantity: item.soldQuantity,
+          unitPrice: item.unitPrice,
+        })),
+      })
+
+      for (const item of items) {
+        await stockService.decreaseStock(
+          item.variantId,
+          item.soldQuantity,
+          "SALE",
+          createdSale.id,
+          undefined,
+          tx,
+        )
+      }
+
+      for (const entry of payload.productIds) {
+        await tx.product.update({
+          where: { id: entry.productId },
+          data: { saleOrderId: createdSale.id },
+        })
+      }
+    })
+  },
 }

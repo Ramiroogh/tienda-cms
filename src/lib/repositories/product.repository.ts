@@ -76,6 +76,28 @@ export const productRepository = {
   },
 
 
+  // ── findAvailableForPurchase ─────────────────────────────────────────────────
+
+  findAvailableForPurchase: async (): Promise<ProductWithVariants[]> => {
+    return prisma.product.findMany({
+      where: { purchaseOrderId: null },
+      include: { variants: true },
+      orderBy: { createdAt: "desc" },
+    })
+  },
+
+
+  // ── findAvailableForSale ─────────────────────────────────────────────────────
+
+  findAvailableForSale: async (): Promise<ProductWithVariants[]> => {
+    return prisma.product.findMany({
+      where: { purchaseOrderId: { not: null }, saleOrderId: null, isActive: true },
+      include: { variants: true },
+      orderBy: { createdAt: "desc" },
+    })
+  },
+
+
   // ── findByIdWithFullDetail ───────────────────────────────────────────────────
 
   findByIdWithFullDetail: async (productId: string) => {

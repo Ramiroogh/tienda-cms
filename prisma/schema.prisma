@@ -69,6 +69,8 @@ model Product {
   salePrice      Float
   productStatus  ProductStatus @default(DRAFT)
   isActive       Boolean       @default(true)
+  purchaseOrderId String?
+  saleOrderId    String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -76,6 +78,8 @@ model Product {
   variants      ProductVariant[]
   saleItems     SaleItem[]
   purchaseItems PurchaseOrderItem[]
+  purchaseOrder PurchaseOrder?        @relation("ProductPurchaseOrder", fields: [purchaseOrderId], references: [id])
+  saleOrder     Sale?                 @relation("ProductSaleOrder", fields: [saleOrderId], references: [id])
 }
 
 model ProductVariant {
@@ -149,6 +153,7 @@ model Sale {
 
   items          SaleItem[]
   stockMovements StockMovement[]
+  products       Product[]            @relation("ProductSaleOrder")
 }
 
 model SaleItem {
@@ -186,27 +191,19 @@ model Supplier {
 // COMPRAS DE MERCADERÍA
 // ─────────────────────────────────────────
 
-enum PurchaseOrderStatus {
-  PENDIENTE
-  RECIBIDO
-  PARCIAL
-  CANCELADO
-}
-
 model PurchaseOrder {
   id             String              @id @default(cuid())
-  supplierId     String
-  orderStatus    PurchaseOrderStatus @default(PENDIENTE)
+  supplierId     String?
   purchaseDate   DateTime            @default(now())
-  receivedAt     DateTime?
   invoiceNumber  String?
   totalOrderCost Float?
   notes          String?
   createdAt      DateTime            @default(now())
 
-  supplier       Supplier             @relation(fields: [supplierId], references: [id])
+  supplier       Supplier?            @relation(fields: [supplierId], references: [id])
   items          PurchaseOrderItem[]
   stockMovements StockMovement[]
+  products       Product[]            @relation("ProductPurchaseOrder")
 }
 
 model PurchaseOrderItem {

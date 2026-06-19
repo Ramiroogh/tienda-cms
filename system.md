@@ -82,7 +82,6 @@ datasource db {
 enum ProductStatus { DRAFT ACTIVE INACTIVE }
 enum SaleChannel  { PRESENCIAL INSTAGRAM WHATSAPP FACEBOOK OTRO }
 enum PaymentMethod { EFECTIVO TRANSFERENCIA TARJETA OTRO }
-enum PurchaseOrderStatus { PENDIENTE RECIBIDO PARCIAL CANCELADO }
 enum StockMovementReason { PURCHASE SALE MANUAL_ADJUSTMENT INITIAL }
 
 model Category {
@@ -202,15 +201,12 @@ model Supplier {
 
 model PurchaseOrder {
   id             String              @id @default(cuid())
-  supplierId     String
-  orderStatus    PurchaseOrderStatus @default(PENDIENTE)
+  supplierId     String?
   purchaseDate   DateTime            @default(now())
-  receivedAt     DateTime?
-  invoiceNumber  String?
   totalOrderCost Float?
   notes          String?
   createdAt      DateTime            @default(now())
-  supplier       Supplier             @relation(fields: [supplierId], references: [id])
+  supplier       Supplier?            @relation(fields: [supplierId], references: [id])
   items          PurchaseOrderItem[]
   stockMovements StockMovement[]
 }
@@ -265,8 +261,15 @@ model StockMovement {
 8. **SKU auto-generado:** 11 dígitos, único, generado en `createProductAction` con retry de 10 intentos.
 9. **Variante única:** si no hay variantes configuradas, se crea una variante simple sin talla/color.
 10. **Fusión de variantes:** si se agrega un tipo de variante ya existente, los valores se fusionan (sin duplicados).
-11. **Stock según tipo de producto:** productos simples usan `payload.stock` del formulario; productos con variantes usan `v.stockLevel` por combinación.
-12. **Transacciones sin anidar:** `stockService.increaseStock/decreaseStock` aceptan `tx?: Prisma.TransactionClient` opcional para ejecutarse dentro de una transacción padre, evitando transacciones anidadas.
+11. **Órdenes de compra sin estado:** se eliminó el concepto de estado (`PurchaseOrderStatus` enum, campo `orderStatus` y `receivedAt`). Las órdenes se crean y existen como registro, sin transiciones de estado.
+12. **Eliminación de órdenes de compra:** `deletePurchaseOrder` libera los productos (`purchaseOrderId = null`) y elimina la orden con sus items en una transacción. No elimina movimientos de stock vinculados.
+13. **Proveedor opcional en órdenes de compra:** `supplierId` es opcional (`String?`). Si se provee, se valida que el proveedor esté activo. Si no, la orden se crea sin proveedor y `supplier` es `null`.
+14. **Fecha de compra configurable:** el formulario `/purchases/new` incluye un DatePicker para seleccionar la fecha de la orden. Si no se selecciona, se usa `new Date()`.
+15. **Productos disponibles para compra:** `findAvailableForPurchase` busca productos con `purchaseOrderId: null` (sin filtro de `isActive`), permitiendo ver productos recién creados.
+16. **Notificación Toast:** componente reutilizable `Toast` con slide desde lateral derecho, auto-dismiss a los 4s, soporta variantes success/error/info.
+17. **Confirmación con modal:** el componente `ConfirmDialog` reemplaza `window.confirm` en todos los flujos de eliminación (productos, órdenes de compra).
+18. **Resumen financiero en detalle de orden:** se calcula en frontend con `salePrice` traído desde la relación `PurchaseOrderItem → Product`. Incluye Total Costo, Total Venta y Ganancia Real. No se persiste en tablas.
+19. **Transacciones sin anidar:** `stockService.increaseStock/decreaseStock` aceptan `tx?: Prisma.TransactionClient` opcional para ejecutarse dentro de una transacción padre, evitando transacciones anidadas.
 
 ---
 
@@ -279,7 +282,7 @@ CMS Tienda
 ├── Stock            → vista centralizada + movimientos
 ├── Ventas           → registro + historial
 ├── Proveedores      → CRUD + detalle con órdenes y productos vinculados
-└── Compras          → órdenes de compra + recepción
+└── Compras          → órdenes de compra (con/sin proveedor, fecha configurable, selección múltiple de productos) + recepción
 ```
 
 ---
@@ -486,8 +489,10 @@ ProductsTable: Búsqueda + tabla paginada (11 items) + multi-select + 3-dot menu
 | Paginación | 11 items por página, ChevronLeft/ChevronRight, contador "X–Y de Z" |
 | Estados | Skeleton loading, empty state, sin resultados |
 | Filas | Clickeables → navegan al detalle |
-| **Stock** | Suma de `stockLevel` de todos los variants del producto |
-| **Precio** | Si todas las variantes comparten precio → lo muestra. Si difieren → link "Con variantes" que abre `VariantInfoModal` con lista de combinaciones y precios |
+| **Estado** | Badge con color condicional: `ACTIVE` → fondo verde (`bg-green-100 text-green-700`), `INACTIVE` → fondo blanco (`bg-white text-muted-foreground`), `DRAFT` → fondo muted |
+| **Stock** | Si `mainStock === 0` → muestra "Sin Stock" en rojo. Si es > 0, muestra `{mainStock} u.` (también en rojo si ≤ 5) |
+| **Variantes** | Mini badges con los tipos de variante del producto (Talle, Color y `propertyName1-3` dinámicos). Si el producto no tiene variantes, muestra "Sin variantes" en gris |
+| **Precio Venta** | Nombre de columna es "Precio Venta". Si todas las variantes comparten precio → lo muestra. Si difieren → link "Con variantes" que abre `VariantInfoModal` con lista de combinaciones y precios |
 
 **Eliminación de productos:**
 - Sin historial de ventas ni compras → elimina físicamente (StockMovements → Variants → Product)
@@ -540,7 +545,73 @@ Los productos vinculados se filtran mediante la relación `purchaseItems → pur
 
 ---
 
-## 13. Estructura de Carpetas (Real)
+## 13. Compras
+
+### 13.1 Órdenes de Compra
+
+Las órdenes de compra no tienen estado — se crean como registro y pueden eliminarse.
+
+**Flujo A — Productos sin orden asignada (`/purchases/new`)**
+- Muestra todos los productos con `purchaseOrderId: null`
+- Selección múltiple via checkboxes + select-all
+- Campos: proveedor (opcional), fecha de compra (DatePicker, formato `dd/MM/yyyy`, default hoy), costo de envío, notas
+- Al submit: crea `PurchaseOrder`, asigna `purchaseOrderId` a cada producto seleccionado, almacena el costo de envío como `totalOrderCost`
+
+**Flujo B — Reposición (con producto existente)**
+- Requiere producto, variante, cantidad y costo unitario
+- Crea `PurchaseOrder` y aumenta stock inmediatamente
+
+### 13.2 Eliminación
+
+- Botón "Eliminar" en dropdown de la tabla y botón dedicado en detalle de orden
+- Confirmación con modal `ConfirmDialog` (reemplaza `window.confirm`)
+- Libera todos los productos (`purchaseOrderId = null`)
+- Elimina la orden y sus items en una transacción
+- Los productos quedan disponibles para nuevas órdenes
+- `Toast` de éxito al eliminar (tabla: toast inline; detalle: toast + redirect a `/purchases` a los 1.5s)
+
+### 13.3 Success Notification
+
+- Tras crear orden, redirige a `/purchases?success=1`
+- `PurchasesTable` detecta el parámetro URL, limpia el query param, y muestra `Toast` animado (slide-in desde la derecha, auto-dismiss 4s)
+
+### 13.4 Tabla de Órdenes
+
+- Columnas: Fecha, Proveedor, Envío, Costo total
+- Sin filtro por estado
+- Sin badge de estado en detalle
+- Sin columna Factura
+- Envío: muestra costo si `totalOrderCost > 0`, "Sin envío" si es 0 o null
+
+### 13.5 Detalle de Orden (`/purchases/[id]`)
+
+Componente cliente `PurchaseDetail` con:
+
+- **Info card:** Proveedor, Fecha, Envío en grid de 3 columnas
+- **Productos agrupados** por `product.name` en secciones expandibles con chevron
+  - Header: nombre del producto + cantidad total + total costo
+  - Al expandir: tabla con columnas `Variante | Costo uni. | Subtotal costo | Venta uni. | Subtotal venta`
+  - Productos sin variantes muestran "Sin variantes" como variante
+  - Cada item muestra: cantidad × precio unitario + subtotal
+- **ConfirmDialog** en modal para eliminar desde detalle vía `DeleteOrderSection`
+- **Toast** de éxito al eliminar con redirect a `/purchases`
+
+### 13.6 Resumen Financiero
+
+Card al final del detalle con 3 indicadores:
+
+| Indicador | Fórmula | Color |
+|---|---|---|
+| Total Costo | `Σ(unitCost × orderedQuantity)` + envío | Neutral |
+| Total Venta (Subtotal) | `Σ(salePrice × orderedQuantity)` | Verde |
+| Ganancia Real | Total Venta − Total Costo | Verde (≥0) / Rojo (<0) |
+
+- `salePrice` se obtiene del `Product` via relación `PurchaseOrderItem → Product` en la consulta del repositorio
+- Los cálculos son en tiempo de ejecución en el frontend, no persisten en tablas
+
+---
+
+## 14. Estructura de Carpetas (Real)
 
 ```
 src/
@@ -565,7 +636,7 @@ src/
 │   ├── purchases/
 │   │   ├── page.tsx                    → historial
 │   │   ├── new/page.tsx                → nueva orden
-│   │   └── [id]/page.tsx              → detalle / recepción
+│   │   └── [id]/page.tsx              → detalle con productos agrupados + resumen financiero
 │   ├── stock/page.tsx                  → vista general stock
 │   ├── test-upload/page.tsx            → página de prueba R2
 │   ├── layout.tsx                      → layout con sidebar
@@ -610,10 +681,11 @@ src/
 │   ├── purchases/
 │   │   ├── PurchaseList.tsx
 │   │   ├── PurchaseForm.tsx
-│   │   └── PurchaseDetail.tsx
+│   │   ├── PurchaseDetail.tsx          → cliente, agrupado por producto, expandible, resumen financiero
+│   │   └── DeleteOrderSection.tsx     → botón + ConfirmDialog + Toast para eliminar desde detalle
 │   ├── stock/
 │   │   └── StockDashboard.tsx
-│   └── ui/                             → shadcn/ui components (table, button, dropdown-menu, input, select)
+│   └── ui/                            → shadcn/ui + custom: table, button, dropdown-menu, input, select, calendar, date-picker, toast, confirm-dialog
 
 ├── lib/
 │   ├── prisma.ts                       → singleton PrismaClient con Neon adapter
@@ -635,7 +707,7 @@ src/
 
 ---
 
-## 14. Variables de Entorno (.env)
+## 15. Variables de Entorno (.env)
 
 ```env
 DATABASE_URL="postgresql://neondb_owner:npg_W6o5TPmKiQbC@ep-orange-truth-acj3aexm-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
@@ -649,7 +721,7 @@ R2_PUBLIC_URL="https://pub-ab1789f8a54f48bc89878b23ccf27e1e.r2.dev"
 
 ---
 
-## 15. Server Actions (Formularios)
+## 16. Server Actions (Formularios)
 
 Todas las acciones usan `useActionState` en el cliente (React 19):
 
@@ -666,7 +738,7 @@ Tipo `ActionResult`: `{ success: boolean; data?: any; error?: string }`
 Módulos de actions:
 - `product.actions.ts` — create (SKU auto), update, getProducts, getProductById, activate, deactivate, **deleteProduct**
 - `sale.actions.ts` — registerSale, getSales, getSaleById
-- `purchase.actions.ts` — createSupplier, updateSupplier, getSuppliers, getSupplierById, registerRestock, getPurchaseOrders, getPurchaseOrderById
+- `purchase.actions.ts` — createSupplier, updateSupplier, getSuppliers, getSupplierById, registerRestock, registerPurchaseOrder (nuevo flujo), registerPurchaseWithNewProduct (flujo con producto nuevo), getPurchaseOrders, getPurchaseOrderById
 - `stock.actions.ts` — adjustStock, getStockMovements
 - `category.actions.ts` — createCategory, getAllCategories, getCategoryTree
 - `brand.actions.ts` — createBrand, getBrands
@@ -692,7 +764,7 @@ async function generateUniqueSku(): Promise<string> {
 
 ---
 
-## 16. Comandos
+## 17. Comandos
 
 ```sh
 npm run dev        # next dev (Turbopack)
@@ -706,7 +778,7 @@ npx shadcn add <component>  # agregar componente shadcn/ui
 
 ---
 
-## 17. Constantes del Sistema (src/lib/constants.ts)
+## 18. Constantes del Sistema (src/lib/constants.ts)
 
 | Constante | Valor | Propósito |
 |---|---|---|
@@ -719,7 +791,7 @@ npx shadcn add <component>  # agregar componente shadcn/ui
 
 ---
 
-## 18. Próximos Pasos
+## 19. Próximos Pasos
 
 - [x] Inicializar proyecto Next.js 16 + shadcn + Tailwind v4
 - [x] Configurar NeonDB + Prisma v7 + migración init
@@ -739,6 +811,8 @@ npx shadcn add <component>  # agregar componente shadcn/ui
 - [x] SKU auto-generado de 11 dígitos
 - [x] Productos vinculados en detalle de proveedor
 - [x] Tabla de proveedores con búsqueda y paginación
+- [x] Orden de compra con selección múltiple de productos (sin proveedor requerido, fecha configurable)
+- [x] Proveedor opcional en órdenes de compra (supplierId String?, campo opcional en formularios, Supplier? en tipo)
+- [x] DatePicker reutilizable (Calendar + DatePicker en components/ui/, locale es-AR, formato dd/MM/yyyy)
+- [x] Toast notification (slide desde lateral derecho, auto-dismiss, variantes success/error/info)
 - [ ] Autenticación
-- [ ] Selectores de producto/proveedor en formularios de compra/venta
-- [ ] Filtros funcionales en listados de ventas y compras

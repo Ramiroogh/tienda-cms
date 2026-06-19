@@ -43,7 +43,7 @@ const purchaseItemSchema = z.object({
 })
 
 export const registerRestockSchema = z.object({
-  supplierId: z.string().min(1, "Debe seleccionar un proveedor"),
+  supplierId: z.string().optional(),
   purchaseDate: z.date(),
   invoiceNumber: z.string().optional(),
   notes: z.string().optional(),
@@ -62,7 +62,7 @@ export const registerPurchaseNewProductSchema = z.object({
     size: z.string().optional(),
     color: z.string().optional(),
   })).min(1, "Debe tener al menos una variante"),
-  supplierId: z.string().min(1, "Debe seleccionar un proveedor"),
+  supplierId: z.string().optional(),
   purchaseDate: z.date(),
   invoiceNumber: z.string().optional(),
   notes: z.string().optional(),

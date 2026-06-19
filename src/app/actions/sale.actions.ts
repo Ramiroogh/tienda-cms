@@ -20,6 +20,7 @@ import {
   InsufficientStockError,
   ProductNotActiveError,
   SaleNotFoundError,
+  ProductNotFoundError,
 } from "@/lib/errors/domain.errors"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,5 +81,35 @@ export async function getSaleByIdAction(
       return { success: false, error: error.message }
     }
     return { success: false, error: "Error al obtener la venta." }
+  }
+}
+
+export async function registerSaleOrderAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const rawData = Object.fromEntries(formData)
+
+  try {
+    const productIds = JSON.parse((rawData.productIds as string) ?? "[]") as Array<{ productId: string; unitPrice: number }>
+    if (productIds.length === 0) {
+      return { success: false, error: "Debe seleccionar al menos un producto." }
+    }
+
+    await saleService.registerSaleOrder({
+      saleChannel: rawData.saleChannel as string,
+      paymentMethod: rawData.paymentMethod as string,
+      discountAmount: rawData.discountAmount ? Number(rawData.discountAmount) : undefined,
+      notes: rawData.notes as string,
+      productIds,
+    })
+    return { success: true }
+  } catch (error) {
+    if (error instanceof InsufficientStockError) {
+      return { success: false, error: error.message }
+    }
+    if (error instanceof ProductNotActiveError) {
+      return { success: false, error: error.message }
+    }
+    return { success: false, error: error instanceof Error ? error.message : "Error al registrar la venta." }
   }
 }

@@ -222,4 +222,18 @@ export const productService = {
     return STOCK_AVAILABILITY.IN_STOCK
   },
 
+
+  // ── getAvailableForPurchase ──────────────────────────────────────────────────
+
+  getAvailableForPurchase: async () => {
+    return productRepository.findAvailableForPurchase()
+  },
+
+
+  // ── getAvailableForSale ──────────────────────────────────────────────────────
+
+  getAvailableForSale: async () => {
+    return productRepository.findAvailableForSale()
+  },
+
 }
